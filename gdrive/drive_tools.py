@@ -1808,14 +1808,19 @@ async def update_drive_file_content(
             ".md, .txt, .csv, .json, .html, .xml, .yaml"
         )
 
-    content_mime = mime_type if mime_type else current_mime
-
-    if mime_type and mime_type not in UPDATABLE_TEXT_MIME_TYPES:
-        raise UserInputError(
-            f"Cannot use MIME type '{mime_type}' for content update. "
-            "Only text-based MIME types are supported: "
-            + ", ".join(sorted(UPDATABLE_TEXT_MIME_TYPES))
-        )
+    if mime_type is not None:
+        mime_type = mime_type.strip()
+        if not mime_type:
+            raise UserInputError("mime_type cannot be empty when provided.")
+        if mime_type not in UPDATABLE_TEXT_MIME_TYPES:
+            raise UserInputError(
+                f"Cannot use MIME type '{mime_type}' for content update. "
+                "Only text-based MIME types are supported: "
+                + ", ".join(sorted(UPDATABLE_TEXT_MIME_TYPES))
+            )
+        content_mime = mime_type
+    else:
+        content_mime = current_mime
 
     media = MediaIoBaseUpload(
         io.BytesIO(content.encode("utf-8")),
