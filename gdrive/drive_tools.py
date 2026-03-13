@@ -1823,15 +1823,17 @@ async def update_drive_file_content(
         resumable=False,
     )
 
+    update_kwargs: Dict[str, Any] = {
+        "fileId": file_id,
+        "media_body": media,
+        "fields": "id, name, mimeType, modifiedTime, webViewLink",
+        "supportsAllDrives": True,
+    }
+    if mime_type is not None:
+        update_kwargs["body"] = {"mimeType": content_mime}
+
     updated_file = await asyncio.to_thread(
-        service.files()
-        .update(
-            fileId=file_id,
-            media_body=media,
-            fields="id, name, modifiedTime, webViewLink",
-            supportsAllDrives=True,
-        )
-        .execute
+        service.files().update(**update_kwargs).execute
     )
 
     file_name = updated_file.get("name", current_file.get("name", "unknown"))
