@@ -605,6 +605,24 @@ async def create_drive_file(
         f"[create_drive_file] Invoked. Email: '{user_google_email}', File Name: {file_name}, Folder ID: {folder_id}, fileUrl: {fileUrl}"
     )
 
+    # Auto-detect MIME type from file extension when caller uses the default
+    if mime_type == "text/plain":
+        _ext_mime_map = {
+            ".md": "text/markdown",
+            ".markdown": "text/markdown",
+            ".csv": "text/csv",
+            ".html": "text/html",
+            ".htm": "text/html",
+            ".xml": "text/xml",
+            ".json": "application/json",
+            ".yaml": "text/yaml",
+            ".yml": "text/yaml",
+        }
+        _ext = Path(file_name).suffix.lower()
+        if _ext in _ext_mime_map:
+            mime_type = _ext_mime_map[_ext]
+            logger.info(f"[create_drive_file] Auto-detected MIME type '{mime_type}' from extension '{_ext}'")
+
     if content is None and fileUrl is None and mime_type != FOLDER_MIME_TYPE:
         raise Exception("You must provide either 'content' or 'fileUrl'.")
 
