@@ -25,7 +25,7 @@ from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from auth.service_decorator import require_google_service
 from auth.oauth_config import is_stateless_mode
 from core.attachment_storage import get_attachment_storage, get_attachment_url
-from core.utils import extract_office_xml_text, handle_http_errors, validate_file_path
+from core.utils import extract_office_xml_text, handle_http_errors, UserInputError, validate_file_path
 from core.server import server
 from core.config import get_transport_mode
 from gdrive.drive_helpers import (
@@ -1727,6 +1727,103 @@ async def update_drive_file(
 
     output_parts.append("")
     output_parts.append(f"View file: {updated_file.get('webViewLink', '#')}")
+
+    return "\n".join(output_parts)
+
+
+UPDATABLE_TEXT_MIME_TYPES = {
+    "text/plain",
+    "text/markdown",
+    "text/x-markdown",
+    "text/csv",
+    "text/html",
+    "text/xml",
+    "text/yaml",
+    "application/json",
+    "application/xml",
+    "application/x-yaml",
+}
+
+
+@server.tool()
+@handle_http_errors("update_drive_file_content", is_read_only=False, service_type="drive")
+@require_google_service("drive", "drive_file")
+async def update_drive_file_content(
+    service,
+    user_google_email: str,
+    file_id: str,
+    content: str,
+    mime_type: Optional[str] = None,
+) -> str:
+    """
+    Updates the content of an existing text-based file in Google Drive.
+
+    Overwrites the entire file content. Works with uploaded text files
+    (.md, .txt, .csv, .json, .html, .xml, .yaml). Does NOT work with
+    native Google Docs/Sheets/Slides — use modify_doc_text or
+    batch_update_doc for those.
+
+    Args:
+        user_google_email (str): The user's Google email address. Required.
+        file_id (str): The ID of the file to update. Required.
+        content (str): The new file content. Overwrites existing content entirely.
+        mime_type (Optional[str]): MIME type for the upload. Defaults to the
+            file's existing MIME type. If provided, changes the stored MIME type.
+
+    Returns:
+        str: Confirmation message with file name, ID, character count, and link.
+    """
+    logger.info(f"[update_drive_file_content] Updating content of {file_id} for {user_google_email}")
+
+    resolved_file_id, current_file = await resolve_drive_item(
+        service,
+        file_id,
+        extra_fields="name, mimeType, webViewLink",
+    )
+    file_id = resolved_file_id
+    current_mime = current_file.get("mimeType", "text/plain")
+
+    if current_mime.startswith("application/vnd.google-apps"):
+        raise UserInputError(
+            f"Cannot update content of native Google file (type: {current_mime}). "
+            "Use modify_doc_text or batch_update_doc for Google Docs, "
+            "or modify_sheet_values for Google Sheets."
+        )
+
+    if current_mime not in UPDATABLE_TEXT_MIME_TYPES:
+        raise UserInputError(
+            f"Cannot update content of file with MIME type '{current_mime}'. "
+            "Only text-based files are supported: "
+            ".md, .txt, .csv, .json, .html, .xml, .yaml"
+        )
+
+    content_mime = mime_type if mime_type else current_mime
+
+    media = MediaIoBaseUpload(
+        io.BytesIO(content.encode("utf-8")),
+        mimetype=content_mime,
+        resumable=False,
+    )
+
+    updated_file = await asyncio.to_thread(
+        service.files()
+        .update(
+            fileId=file_id,
+            media_body=media,
+            fields="id, name, modifiedTime, webViewLink",
+            supportsAllDrives=True,
+        )
+        .execute
+    )
+
+    file_name = updated_file.get("name", current_file.get("name", "unknown"))
+    char_count = len(content)
+
+    output_parts = [
+        f"Updated content of '{file_name}' (ID: {file_id}, {char_count} characters)",
+        f"Modified: {updated_file.get('modifiedTime', 'unknown')}",
+        f"View file: {updated_file.get('webViewLink', '#')}",
+    ]
 
     return "\n".join(output_parts)
 
