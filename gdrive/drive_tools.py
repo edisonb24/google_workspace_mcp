@@ -1810,6 +1810,13 @@ async def update_drive_file_content(
 
     content_mime = mime_type if mime_type else current_mime
 
+    if mime_type and mime_type not in UPDATABLE_TEXT_MIME_TYPES:
+        raise UserInputError(
+            f"Cannot use MIME type '{mime_type}' for content update. "
+            "Only text-based MIME types are supported: "
+            + ", ".join(sorted(UPDATABLE_TEXT_MIME_TYPES))
+        )
+
     media = MediaIoBaseUpload(
         io.BytesIO(content.encode("utf-8")),
         mimetype=content_mime,
@@ -1853,15 +1860,14 @@ async def delete_drive_file(
     remove, or trash a file.
 
     By default moves the file to trash (recoverable for 30 days).
-    If the file is already trashed, automatically permanently deletes it.
-    Set permanent=True to skip trash and permanently delete immediately.
+    Set permanent=True to permanently delete (not recoverable).
 
     Args:
         user_google_email (str): The user's Google email address. Required.
         file_id (str): The ID of the file to delete. Required.
         permanent (bool): If True, permanently deletes the file (not recoverable).
-            If False (default), moves to trash. If the file is already in trash,
-            permanently deletes it regardless of this flag.
+            If False (default), moves to trash. If already trashed, returns a
+            message indicating the file is already in trash.
 
     Returns:
         str: Confirmation message describing what happened.
@@ -1879,7 +1885,7 @@ async def delete_drive_file(
     file_name = current_file.get("name", "unknown")
     already_trashed = current_file.get("trashed", False)
 
-    if permanent or already_trashed:
+    if permanent:
         await asyncio.to_thread(
             service.files()
             .delete(
@@ -1888,21 +1894,25 @@ async def delete_drive_file(
             )
             .execute
         )
-        if already_trashed and not permanent:
-            return f"Permanently deleted '{file_name}' (ID: {file_id}) — file was already in trash."
         return f"Permanently deleted '{file_name}' (ID: {file_id})."
-    else:
-        await asyncio.to_thread(
-            service.files()
-            .update(
-                fileId=file_id,
-                body={"trashed": True},
-                fields="id",
-                supportsAllDrives=True,
-            )
-            .execute
+
+    if already_trashed:
+        return (
+            f"File '{file_name}' (ID: {file_id}) is already in trash. "
+            "Use permanent=True to permanently delete it."
         )
-        return f"Moved '{file_name}' (ID: {file_id}) to trash. Use permanent=True or delete again to permanently remove."
+
+    await asyncio.to_thread(
+        service.files()
+        .update(
+            fileId=file_id,
+            body={"trashed": True},
+            fields="id",
+            supportsAllDrives=True,
+        )
+        .execute
+    )
+    return f"Moved '{file_name}' (ID: {file_id}) to trash. Use permanent=True to permanently delete."
 
 
 @server.tool()
