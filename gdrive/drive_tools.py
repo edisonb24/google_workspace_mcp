@@ -25,7 +25,12 @@ from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from auth.service_decorator import require_google_service
 from auth.oauth_config import is_stateless_mode
 from core.attachment_storage import get_attachment_storage, get_attachment_url
-from core.utils import extract_office_xml_text, handle_http_errors, UserInputError, validate_file_path
+from core.utils import (
+    extract_office_xml_text,
+    handle_http_errors,
+    UserInputError,
+    validate_file_path,
+)
 from core.server import server
 from core.config import get_transport_mode
 from gdrive.drive_helpers import (
@@ -621,7 +626,9 @@ async def create_drive_file(
         _ext = Path(file_name).suffix.lower()
         if _ext in _ext_mime_map:
             mime_type = _ext_mime_map[_ext]
-            logger.info(f"[create_drive_file] Auto-detected MIME type '{mime_type}' from extension '{_ext}'")
+            logger.info(
+                f"[create_drive_file] Auto-detected MIME type '{mime_type}' from extension '{_ext}'"
+            )
 
     if content is None and fileUrl is None and mime_type != FOLDER_MIME_TYPE:
         raise Exception("You must provide either 'content' or 'fileUrl'.")
@@ -1746,7 +1753,9 @@ UPDATABLE_TEXT_MIME_TYPES = {
 
 
 @server.tool()
-@handle_http_errors("update_drive_file_content", is_read_only=False, service_type="drive")
+@handle_http_errors(
+    "update_drive_file_content", is_read_only=False, service_type="drive"
+)
 @require_google_service("drive", "drive_file")
 async def update_drive_file_content(
     service,
@@ -1773,7 +1782,9 @@ async def update_drive_file_content(
     Returns:
         str: Confirmation message with file name, ID, character count, and link.
     """
-    logger.info(f"[update_drive_file_content] Updating content of {file_id} for {user_google_email}")
+    logger.info(
+        f"[update_drive_file_content] Updating content of {file_id} for {user_google_email}"
+    )
 
     resolved_file_id, current_file = await resolve_drive_item(
         service,
@@ -1855,7 +1866,9 @@ async def delete_drive_file(
     Returns:
         str: Confirmation message describing what happened.
     """
-    logger.info(f"[delete_drive_file] Deleting {file_id} for {user_google_email} (permanent={permanent})")
+    logger.info(
+        f"[delete_drive_file] Deleting {file_id} for {user_google_email} (permanent={permanent})"
+    )
 
     resolved_file_id, current_file = await resolve_drive_item(
         service,
