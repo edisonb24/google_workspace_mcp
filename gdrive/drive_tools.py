@@ -1829,6 +1829,70 @@ async def update_drive_file_content(
 
 
 @server.tool()
+@handle_http_errors("delete_drive_file", is_read_only=False, service_type="drive")
+@require_google_service("drive", "drive_file")
+async def delete_drive_file(
+    service,
+    user_google_email: str,
+    file_id: str,
+    permanent: bool = False,
+) -> str:
+    """
+    Deletes a file from Google Drive. Use this tool when asked to delete,
+    remove, or trash a file.
+
+    By default moves the file to trash (recoverable for 30 days).
+    If the file is already trashed, automatically permanently deletes it.
+    Set permanent=True to skip trash and permanently delete immediately.
+
+    Args:
+        user_google_email (str): The user's Google email address. Required.
+        file_id (str): The ID of the file to delete. Required.
+        permanent (bool): If True, permanently deletes the file (not recoverable).
+            If False (default), moves to trash. If the file is already in trash,
+            permanently deletes it regardless of this flag.
+
+    Returns:
+        str: Confirmation message describing what happened.
+    """
+    logger.info(f"[delete_drive_file] Deleting {file_id} for {user_google_email} (permanent={permanent})")
+
+    resolved_file_id, current_file = await resolve_drive_item(
+        service,
+        file_id,
+        extra_fields="name, mimeType, trashed",
+    )
+    file_id = resolved_file_id
+    file_name = current_file.get("name", "unknown")
+    already_trashed = current_file.get("trashed", False)
+
+    if permanent or already_trashed:
+        await asyncio.to_thread(
+            service.files()
+            .delete(
+                fileId=file_id,
+                supportsAllDrives=True,
+            )
+            .execute
+        )
+        if already_trashed and not permanent:
+            return f"Permanently deleted '{file_name}' (ID: {file_id}) — file was already in trash."
+        return f"Permanently deleted '{file_name}' (ID: {file_id})."
+    else:
+        await asyncio.to_thread(
+            service.files()
+            .update(
+                fileId=file_id,
+                body={"trashed": True},
+                fields="id",
+                supportsAllDrives=True,
+            )
+            .execute
+        )
+        return f"Moved '{file_name}' (ID: {file_id}) to trash. Use permanent=True or delete again to permanently remove."
+
+
+@server.tool()
 @handle_http_errors("get_drive_shareable_link", is_read_only=True, service_type="drive")
 @require_google_service("drive", "drive_read")
 async def get_drive_shareable_link(
