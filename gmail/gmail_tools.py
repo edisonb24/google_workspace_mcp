@@ -55,6 +55,7 @@ from gmail.gmail_helpers import (
     GMAIL_METADATA_HEADERS,
     RAW_BODY_TRUNCATE_LIMIT,
     _analyze_thread_ownership_impl,
+    _build_forward_content,
     _is_benign_signature_http_error,
     _signature_fetch_tool_error,
 )
@@ -452,8 +453,6 @@ def _build_quoted_reply_body(
         On {date}, {sender} wrote:
         > quoted original
     """
-    import html as _html_mod
-
     if original.get("date"):
         attribution = f"On {original['date']}, {original['sender']} wrote:"
     else:
@@ -469,11 +468,11 @@ def _build_quoted_reply_body(
         orig_html = original.get("html_body") or ""
         if not orig_html:
             orig_text = original.get("text_body", "")
-            orig_html = f"<pre>{_html_mod.escape(orig_text)}</pre>"
+            orig_html = f"<pre>{html.escape(orig_text)}</pre>"
 
         quote_block = (
             '<br><br><div class="gmail_quote">'
-            f"<span>{_html_mod.escape(attribution)}</span><br>"
+            f"<span>{html.escape(attribution)}</span><br>"
             '<blockquote style="margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex">'
             f"{orig_html}"
             "</blockquote></div>"
@@ -2254,83 +2253,13 @@ async def _forward_gmail_message_impl(
 
     payload = original_message.get("payload", {})
 
-    # Extract headers from original message
-    headers = _extract_headers(payload, ["Subject", "From", "Date", "To"])
-    original_subject = headers.get("Subject", "(no subject)")
-    original_from = headers.get("From", "(unknown sender)")
-    original_date = headers.get("Date", "(unknown date)")
-    original_to = headers.get("To", "")
-
-    # Extract bodies (text and HTML)
-    bodies = _extract_message_bodies(payload)
-    original_text = bodies.get("text", "")
-    original_html = bodies.get("html", "")
-
-    # Determine if we have HTML content
-    has_html = bool(original_html.strip())
-
-    # Build the forward header block
-    forward_header_text = (
-        "---------- Forwarded message ---------\n"
-        f"From: {original_from}\n"
-        f"Date: {original_date}\n"
-        f"Subject: {original_subject}\n"
-        f"To: {original_to}"
+    forward_subject, forward_body, body_format = _build_forward_content(
+        headers=_extract_headers(payload, ["Subject", "From", "Date", "To"]),
+        bodies=_extract_message_bodies(payload),
+        forward_message=forward_message,
+        forward_message_format=forward_message_format,
+        subject_override=subject,
     )
-
-    # Escape header values for the HTML forward block (these are meant to render
-    # as text, and may contain markup from the original message).
-    forward_header_html = (
-        '<div style="color: #777;">'
-        "---------- Forwarded message ---------<br/>"
-        f"From: {html.escape(original_from)}<br/>"
-        f"Date: {html.escape(original_date)}<br/>"
-        f"Subject: {html.escape(original_subject)}<br/>"
-        f"To: {html.escape(original_to)}"
-        "</div>"
-    )
-
-    # Use the HTML body when the original is HTML, or when the caller supplied an
-    # HTML note (so an explicit forward_message_format="html" is honored even for
-    # plain-text originals).
-    use_html = has_html or bool(forward_message and forward_message_format == "html")
-
-    # Construct the forward body
-    if use_html:
-        # Build HTML forward body
-        user_message_html = ""
-        if forward_message:
-            if forward_message_format == "html":
-                user_message_html = f"<div>{forward_message}</div><br/>"
-            else:
-                # Convert plain text to HTML (escape and preserve newlines)
-                escaped = html.escape(forward_message)
-                user_message_html = (
-                    f"<div>{escaped.replace(chr(10), '<br/>')}</div><br/>"
-                )
-
-        # Preserve the original HTML when present; otherwise escape the plain-text
-        # original so it renders correctly inside the HTML forward block.
-        original_body_html = (
-            original_html
-            if has_html
-            else html.escape(original_text).replace(chr(10), "<br/>")
-        )
-
-        forward_body = (
-            f"{user_message_html}"
-            f'<div style="border-left: 1px solid #ccc; padding-left: 10px; margin-left: 10px;">'
-            f"{forward_header_html}"
-            f"<br/>"
-            f"{original_body_html}"
-            f"</div>"
-        )
-        body_format = "html"
-    else:
-        # Build plain text forward body
-        user_message_text = f"{forward_message}\n\n" if forward_message else ""
-        forward_body = f"{user_message_text}{forward_header_text}\n\n{original_text}"
-        body_format = "plain"
 
     # Handle attachments
     attachments_to_send = []
@@ -2378,15 +2307,6 @@ async def _forward_gmail_message_impl(
                 "Failed to include requested attachment(s): "
                 + ", ".join(failed_attachments)
             )
-
-    # Use an explicit subject override when supplied; otherwise derive the forward
-    # subject, avoiding a double prefix for common forward variants ("Fwd:", "FW:").
-    if subject:
-        forward_subject = subject
-    else:
-        forward_subject = original_subject
-        if not forward_subject.lower().lstrip().startswith(("fwd:", "fw:")):
-            forward_subject = f"Fwd: {original_subject}"
 
     # Prepare and send the message
     sender_email = from_email or user_google_email
